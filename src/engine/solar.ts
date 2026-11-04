@@ -30,8 +30,8 @@ export function calculateSolarPVSizing(input: HydraulicInput) {
   const rho = 1000;
   const g = 9.81;
 
-  // Hydraulic power in kW: P_hyd = (rho * g * Q * H) / 3,600,000
-  const hydraulicPowerKW = (rho * g * flowRateM3s * totalHeadMeters) / 3600000;
+  // Hydraulic power in kW: P_hyd = (rho * g * Q * H) / 1000 (Watts to kW conversion)
+  const hydraulicPowerKW = (rho * g * flowRateM3s * totalHeadMeters) / 1000;
 
   // System efficiencies and derating factors
   const pumpEfficiency = 0.65;    // 65% standard wire-to-water
