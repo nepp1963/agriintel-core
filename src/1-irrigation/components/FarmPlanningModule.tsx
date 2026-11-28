@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polygon, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -50,6 +50,7 @@ const calculateArea = (verts: [number, number][]) => {
 };
 
 export function FarmPlanningModule({ theme = 'dark' }: { theme?: string }) {
+  const mapRef = useRef<L.Map | null>(null);
   const [mapStyle, setMapStyle] = useState<'street' | 'satellite'>('street');
   const [targetCrop, setTargetCrop] = useState('High-Value Vegetables (Onion/Garlic)');
   const [soilTexture, setSoilTexture] = useState('Sandy Loam / Light Texture');
@@ -69,14 +70,16 @@ export function FarmPlanningModule({ theme = 'dark' }: { theme?: string }) {
 
   useEffect(() => {
     localStorage.setItem("agriintel_farm_vertices", JSON.stringify(vertices));
-  }, [vertices]);const isDark = theme === 'dark';
+  }, [vertices]);
+
+  const isDark = theme === 'dark';
 
   const handleMapClick = (latlng: { lat: number; lng: number }) => {
     setVertices((prev: any) => [...prev, [latlng.lat, latlng.lng]]);
   };
 
   // Button Action Handlers
-    const handleLogGPSVertex = () => {
+  const handleLogGPSVertex = () => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
@@ -126,7 +129,46 @@ export function FarmPlanningModule({ theme = 'dark' }: { theme?: string }) {
           if (data.targetCrop) setTargetCrop(data.targetCrop);
           if (data.soilTexture) setSoilTexture(data.soilTexture);
           if (data.terrainSlope !== undefined) setTerrainSlope(data.terrainSlope);
-          if (data.vertices) setVertices(data.vertices);
+
+          const normalizedVertices: [number, number][] = Array.isArray(data.vertices)
+            ? data.vertices
+                .map((pt: any): [number, number] | null => {
+                  if (Array.isArray(pt) && pt.length >= 2) {
+                    return [Number(pt[0]), Number(pt[1])];
+                  }
+                  if (pt && typeof pt.lat === 'number' && typeof pt.lng === 'number') {
+                    return [pt.lat, pt.lng];
+                  }
+                  return null;
+                })
+                .filter((pt: [number, number] | null): pt is [number, number] => pt !== null)
+            : [];
+
+          if (normalizedVertices.length > 0) {
+            setVertices(normalizedVertices);
+            if (mapRef.current) {
+              const bounds = L.latLngBounds(normalizedVertices);
+              if (bounds.isValid()) {
+                mapRef.current.flyToBounds(bounds, {
+                  padding: [50, 50],
+                  maxZoom: 17,
+                  duration: 1.2,
+                });
+              }
+            }
+          } else if (
+            mapRef.current &&
+            data.coordinates &&
+            typeof data.coordinates.lat === 'number' &&
+            typeof data.coordinates.lng === 'number'
+          ) {
+            mapRef.current.flyTo(
+              [data.coordinates.lat, data.coordinates.lng],
+              16,
+              { duration: 1.2 }
+            );
+          }
+
           alert('Farm plan loaded successfully!');
         } catch (err) {
           alert('Invalid JSON file format.');
@@ -207,7 +249,7 @@ export function FarmPlanningModule({ theme = 'dark' }: { theme?: string }) {
             isDark ? 'bg-slate-900/80 border-slate-800' : 'bg-white border-slate-200'
           }`}>
             <h3 className="text-xs font-bold text-emerald-400 tracking-wider uppercase">
-              1. FIELD SURVEY & BOUNDARY INPUTS
+1. FIELD SURVEY & BOUNDARY INPUTS
             </h3>
             <button onClick={handleLogGPSVertex} className="w-full py-2 bg-emerald-950/80 border border-emerald-700/60 hover:bg-emerald-900/50 text-emerald-300 text-xs font-semibold rounded transition">
                 📍 Log Mobile GPS Boundary Vertex
@@ -224,7 +266,7 @@ export function FarmPlanningModule({ theme = 'dark' }: { theme?: string }) {
             isDark ? 'bg-slate-900/80 border-slate-800' : 'bg-white border-slate-200'
           }`}>
             <h3 className="text-xs font-bold text-emerald-400 tracking-wider uppercase">
-              2. SOIL & TOPOGRAPHY PROFILES
+2. SOIL & TOPOGRAPHY PROFILES
             </h3>
             
             <div className="flex flex-col gap-1.5">
@@ -319,6 +361,7 @@ export function FarmPlanningModule({ theme = 'dark' }: { theme?: string }) {
 
           <div className="h-[400px] w-full rounded-lg overflow-hidden border border-slate-800 relative">
             <MapContainer 
+              ref={mapRef}
               center={[13.93410, 121.36320]} 
               zoom={14} 
               style={{ height: '100%', width: '100%' }}
@@ -355,7 +398,7 @@ export function FarmPlanningModule({ theme = 'dark' }: { theme?: string }) {
           </div>
           
           <span className="text-[11px] text-slate-400 italic">
-            * Click anywhere on the map to pin survey points or load a JSON file to reconstruct a saved farm plan.
+- Click anywhere on the map to pin survey points or load a JSON file to reconstruct a saved farm plan.
           </span>
         </div>
       </div>
@@ -365,7 +408,7 @@ export function FarmPlanningModule({ theme = 'dark' }: { theme?: string }) {
         isDark ? 'bg-slate-900/80 border-slate-800' : 'bg-white border-slate-200'
       }`}>
         <h3 className="text-xs font-bold text-emerald-400 tracking-wider uppercase">
-          3. AUTOMATED ENGINEERING & AGRONOMIC RECOMMENDATIONS
+3. AUTOMATED ENGINEERING & AGRONOMIC RECOMMENDATIONS
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="p-3 bg-slate-950/80 border border-slate-800 rounded">

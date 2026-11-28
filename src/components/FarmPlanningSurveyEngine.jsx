@@ -1,6 +1,6 @@
 import { SnapToFarmButton } from "./SnapToFarmButton";
 import { useFarmPlanningCursor } from "../hooks/useFarmPlanningCursor";
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polygon, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -25,13 +25,15 @@ function MapClickHandler({ onAddVertex }) {
 }
 
 export default function FarmPlanningSurveyEngine() {
-  const mapRef = React.useRef(null);
+  const mapRef = useRef(null);
+  const fileInputRef = useRef(null);
   const [vertices, setVertices] = useState([
     { lat: 13.9350, lng: 121.3610 },
     { lat: 13.9360, lng: 121.3650 },
     { lat: 13.9330, lng: 121.3670 },
     { lat: 13.9310, lng: 121.3620 }
   ]);
+  const [activeSite, setActiveSite] = useState('Southern Luzon (Batangas)');
   const [mapStyle, setMapStyle] = useState('satellite'); // 'satellite' or 'plain'
   const [targetCrop, setTargetCrop] = useState('High-Value Vegetables (Onion/Garlic)');
   const [soilTexture, setSoilTexture] = useState('Sandy Loam / Light Texture');
@@ -50,6 +52,72 @@ export default function FarmPlanningSurveyEngine() {
   // Handle reset boundary
   const handleResetBoundary = () => {
     setVertices([]);
+  };
+
+  // Handle loading farm plan JSON and flying to location
+  const handleLoadPlanFile = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = JSON.parse(String(e.target?.result || '{}'));
+
+        const normalizedVertices = Array.isArray(data.vertices)
+          ? data.vertices
+              .map((pt) => {
+                if (Array.isArray(pt) && pt.length >= 2) {
+                  return { lat: Number(pt[0]), lng: Number(pt[1]) };
+                }
+                if (pt && typeof pt.lat === 'number' && typeof pt.lng === 'number') {
+                  return { lat: pt.lat, lng: pt.lng };
+                }
+                return null;
+              })
+              .filter(Boolean)
+          : [];
+
+        if (normalizedVertices.length > 0) {
+          setVertices(normalizedVertices);
+        }
+        if (data.activeSite) setActiveSite(data.activeSite);
+        if (data.targetCrop) setTargetCrop(data.targetCrop);
+        if (data.soilTexture) setSoilTexture(data.soilTexture);
+        if (typeof data.terrainSlope === 'number') setTerrainSlope(data.terrainSlope);
+
+        if (mapRef.current && normalizedVertices.length > 0) {
+          const bounds = L.latLngBounds(
+            normalizedVertices.map((v) => [v.lat, v.lng])
+          );
+          if (bounds.isValid()) {
+            mapRef.current.flyToBounds(bounds, {
+              padding: [50, 50],
+              maxZoom: 17,
+              duration: 1.2,
+            });
+          }
+        } else if (
+          mapRef.current &&
+          data.coordinates &&
+          typeof data.coordinates.lat === 'number' &&
+          typeof data.coordinates.lng === 'number'
+        ) {
+          mapRef.current.flyTo(
+            [data.coordinates.lat, data.coordinates.lng],
+            16,
+            { duration: 1.2 }
+          );
+        }
+      } catch (err) {
+        console.error('Failed to load plan JSON:', err);
+        alert('Invalid JSON plan file.');
+      } finally {
+        event.target.value = '';
+      }
+    };
+
+    reader.readAsText(file);
   };
 
   // Calculate accurate geodesic area and check topology using Turf.js
@@ -86,6 +154,13 @@ export default function FarmPlanningSurveyEngine() {
 
   return (
     <div className="h-screen w-full bg-slate-950 text-slate-100 flex flex-col overflow-hidden">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="application/json,.json"
+        onChange={handleLoadPlanFile}
+        className="hidden"
+      />
       
       {/* Top Header */}
       <header className="bg-slate-900 border-b border-slate-800 px-6 py-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shrink-0 shadow-md">
@@ -96,7 +171,11 @@ export default function FarmPlanningSurveyEngine() {
           <p className="text-xs text-slate-400">Map boundary via Mobile GPS or Drone Survey, auto-derive hydraulic layout & crop plans</p>
         </div>
         <div className="flex items-center gap-3">
-          <button className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-3.5 py-2 rounded-lg border border-slate-700 shadow-sm transition">
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-3.5 py-2 rounded-lg border border-slate-700 shadow-sm transition cursor-pointer"
+          >
             📁 Load Plan (JSON)
           </button>
           <button className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 text-xs font-bold px-3.5 py-2 rounded-lg shadow-sm transition">
@@ -112,7 +191,7 @@ export default function FarmPlanningSurveyEngine() {
       <div className="bg-slate-900/60 border-b border-slate-800/80 px-6 py-2.5 grid grid-cols-2 md:grid-cols-4 gap-4 text-xs shrink-0">
         <div>
           <span className="text-slate-500 block uppercase font-medium">Active GIS Site</span>
-          <span className="text-emerald-400 font-semibold">📍 Southern Luzon (Batangas)</span>
+          <span className="text-emerald-400 font-semibold">📍 {activeSite}</span>
         </div>
         <div>
           <span className="text-slate-500 block uppercase font-medium">Decimal Degrees (DD)</span>
@@ -258,7 +337,7 @@ export default function FarmPlanningSurveyEngine() {
           {/* Leaflet Map */}
           <div className="w-full h-full relative">
 
-            <MapContainer center={[13.9341, 121.3632]} zoom={15} style={{ width: '100%', height: '100%' }} zoomControl={false}>
+            <MapContainer ref={mapRef} center={[13.9341, 121.3632]} zoom={15} style={{ width: '100%', height: '100%' }} zoomControl={false}>
               {mapStyle === 'satellite' ? (
                 <TileLayer
                   attribution='Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS Community'
@@ -274,6 +353,7 @@ export default function FarmPlanningSurveyEngine() {
               )}
 
               <MapClickHandler onAddVertex={handleAddVertex} />
+              <SnapToFarmButton farmPolygonCoords={vertices} />
 
               {/* Render Polygon Boundary */}
               {vertices.length >= 3 && (
@@ -314,7 +394,7 @@ export default function FarmPlanningSurveyEngine() {
           {/* Map Footer Instruction */}
           <div className="absolute bottom-2 left-4 right-4 z-20 text-center pointer-events-none">
             <span className="bg-slate-950/80 backdrop-blur border border-slate-800 text-slate-400 text-[11px] px-3 py-1 rounded-lg shadow pointer-events-auto">
-              * Click anywhere on the map to pin survey points or adjust polygon vertices.
+- Click anywhere on the map to pin survey points or adjust polygon vertices.
             </span>
           </div>
 
@@ -324,4 +404,3 @@ export default function FarmPlanningSurveyEngine() {
     </div>
   );
 }
-```
